@@ -1,0 +1,981 @@
+{
+  "name": "Job Hunter - Matching IA + Cover Letter + Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "6956ff40-94c3-4ac3-83c0-158713a76ea0",
+      "name": "Trigger Diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        16,
+        528
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "url": "https://remoteok.com/api",
+        "options": {}
+      },
+      "id": "26b6ebc1-5b11-4ee1-a018-7dd540d2bd7e",
+      "name": "1a. Fetch RemoteOK",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        224,
+        384
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet jobs = [];\nif (items.length === 1 && Array.isArray(items[0].json)) {\n  jobs = items[0].json;\n} else {\n  jobs = items.map(i => i.json);\n}\njobs = jobs.filter(j => j && j.id);\nreturn jobs.map(j => ({\n  json: {\n    title: j.position || j.title || '',\n    url: j.url || ('https://remoteok.com/remote-jobs/' + j.id),\n    description: (j.description || '').replace(/<[^>]+>/g, ' ').slice(0, 2000),\n    budget: (j.salary_min && j.salary_max) ? ('$' + j.salary_min + ' - $' + j.salary_max) : 'No especificado',\n    datePosted: j.date || '',\n    source: 'RemoteOK'\n  }\n}));"
+      },
+      "id": "607e20fa-75bd-4d02-ae52-1d6891b2b1e6",
+      "name": "1a. Normalizar RemoteOK",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        448,
+        384
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "https://www.arbeitnow.com/api/job-board-api",
+        "options": {}
+      },
+      "id": "2f3e54ed-c48e-472c-b8d1-1405eae136cb",
+      "name": "1b. Fetch Arbeitnow",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        224,
+        528
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst jobs = resp.data || [];\nreturn jobs.map(j => ({\n  json: {\n    title: j.title || '',\n    url: j.url || '',\n    description: (j.description || '').replace(/<[^>]+>/g, ' ').slice(0, 2000),\n    budget: 'No especificado',\n    datePosted: j.created_at ? new Date(j.created_at * 1000).toISOString() : '',\n    source: 'Arbeitnow'\n  }\n}));"
+      },
+      "id": "e1a6772e-8008-472e-b52f-8a536a47d0bd",
+      "name": "1b. Normalizar Arbeitnow",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        448,
+        528
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "a1d67973-464f-445c-b5ef-aa5e903866f7",
+      "name": "Normalizar Campos Vacante",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        672,
+        528
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {},
+      "id": "a8dd374b-4d0d-4d85-992e-12a6334de407",
+      "name": "Unir Datos",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        912,
+        656
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "const historial = $('Leer Vacantes Ya Procesadas').all().map(i => i.json.url);\nconst nuevas = $('Normalizar Campos Vacante').all().filter(i => !historial.includes(i.json.url));\nreturn nuevas;"
+      },
+      "id": "b3d85961-3886-432a-8eea-79765f387a11",
+      "name": "Filtrar Duplicados",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1104,
+        656
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "id": "f0fc0a29-2232-480a-909f-48b2e11e20c6",
+      "name": "Gemini - Modelo Evaluador",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "position": [
+        1392,
+        896
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"score\": 85,\n  \"justificacion\": \"El perfil cumple con 4 de 5 requisitos clave, falta experiencia en Docker.\",\n  \"keywords\": [\"Node.js\", \"React\", \"APIs REST\"]\n}"
+      },
+      "id": "b6c8d9f1-f5bd-407a-87c1-0bb2392c2711",
+      "name": "Parser - Score JSON",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "position": [
+        1584,
+        896
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Redacta una cover letter en primera persona, profesional y directa. Máx. 120 palabras, sin saludos genéricos ni relleno. Escríbela en el idioma de la vacante. Usa solo hechos de mi perfil, no inventes. Responde únicamente con el texto de la carta.\n\nPERFIL: <TU NOMBRE>, <TU TÍTULO O NIVEL, ej. Ing. en Sistemas junior>, <TU CIUDAD>, <TU PAÍS>, inglés <TU NIVEL>. <X años/meses> en <EMPRESA EJEMPLO> como <TU PUESTO>: <LOGRO 1 DE EJEMPLO>, <LOGRO 2 DE EJEMPLO>. Herramientas: <TECNOLOGÍA 1>, <TECNOLOGÍA 2>, <TECNOLOGÍA 3>.\n\nKEYWORDS (úsalas si aplican): {{ [].concat($json.output.keywords).join(', ') }}\n\nVACANTE:\n{{ $json.title }}\n{{ ($json.description || '').replace(/&lt;[^]*?&gt;|<[^>]*>/g, ' ').replace(/&quot;|&amp;|&nbsp;/g, ' ').replace(/\\s+/g, ' ').slice(0, 1000) }}",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "0f9989a1-3866-48a1-88f9-af3bff2b3099",
+      "name": "2. Evaluacion - Match Score vs Perfil",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1568,
+        640
+      ],
+      "typeVersion": 1.9
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "id": "f3accc53-6959-4b27-961d-07ceb8927508",
+      "name": "Gemini - Modelo Redactor",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "position": [
+        2224,
+        992
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Redacta una cover letter en primera persona, profesional y directa. Máx. 120 palabras, sin saludos genéricos ni relleno. Escríbela en el idioma de la vacante. Usa solo hechos de mi perfil, no inventes. Responde únicamente con el texto de la carta.\n\nPERFIL: <TU NOMBRE>, <TU TÍTULO O NIVEL, ej. Ing. en Sistemas junior>, <TU CIUDAD>, <TU PAÍS>, inglés <TU NIVEL>. <X años/meses> en <EMPRESA EJEMPLO> como <TU PUESTO>: <LOGRO 1 DE EJEMPLO>, <LOGRO 2 DE EJEMPLO>. Herramientas: <TECNOLOGÍA 1>, <TECNOLOGÍA 2>, <TECNOLOGÍA 3>.\n\nKEYWORDS (úsalas si aplican): {{ [].concat($json.output.keywords).join(', ') }}\n\nVACANTE:\n{{ ($('2. Evaluacion - Match Score vs Perfil').item.json.description || '').slice(0, 1000) }}",
+        "options": {}
+      },
+      "id": "155ed81e-8ea0-4c6e-a260-b593aed047b3",
+      "name": "4. Adaptacion - Generar Cover Letter",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        2512,
+        304
+      ],
+      "typeVersion": 1.9
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "id": "882f49ff-13dd-464b-b0de-b918e537a40f",
+      "name": "Gemini - Modelo CV Adaptado",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "position": [
+        2416,
+        944
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Reescribe mi CV en TEXTO PLANO ATS-friendly: sin tablas, columnas ni iconos, solo texto y guiones simples. Idioma de la vacante. Reordena y resalta lo más relevante para la vacante e integra las keywords de forma natural. Usa SOLO los datos del perfil base, no inventes nada. Máx. 1 página. Responde solo el CV.\n\nEstructura fija: NOMBRE Y CONTACTO / RESUMEN PROFESIONAL (2-3 líneas) / HABILIDADES TÉCNICAS / EXPERIENCIA / PROYECTOS / EDUCACIÓN Y CERTIFICACIONES\n\nPERFIL BASE:\n<TU NOMBRE COMPLETO>, <TU TÍTULO>. <TU CIUDAD>, <TU PAÍS> | <TU TELÉFONO> | <TU CORREO> | linkedin.com/in/<tu-usuario> | github.com/<tu-usuario>\nIdiomas: <IDIOMA 1 Y NIVEL>, <IDIOMA 2 Y NIVEL>.\nExperiencia: <EMPRESA EJEMPLO>, <PUESTO EJEMPLO> (<MES AÑO> - <MES AÑO>).\n- <Logro o responsabilidad 1: qué hiciste y con qué resultado>.\n- <Logro o responsabilidad 2>.\n- <Logro o responsabilidad 3>.\nProyectos:\n- <Proyecto 1 de ejemplo: descripción breve y tecnologías>.\n- <Proyecto 2 de ejemplo: descripción breve y tecnologías>.\nSkills: <Skill 1>, <Skill 2>, <Skill 3>, <Skill 4>, <Skill 5>.\nEducación: <TÍTULO>, <UNIVERSIDAD>, <FECHA DE GRADUACIÓN>.\nCertificaciones: <CERTIFICACIÓN 1 (fecha)>, <CERTIFICACIÓN 2 (fecha)>.\n\nKEYWORDS: {{ [].concat($('Code in JavaScript').item.json.output.keywords).join(', ') }}\n\nVACANTE:\n{{ $('Code in JavaScript').item.json.title }}\n{{ ($('Code in JavaScript').item.json.description || '').replace(/&lt;[^]*?&gt;|<[^>]*>/g, ' ').replace(/&quot;|&amp;|&nbsp;/g, ' ').replace(/\\s+/g, ' ').slice(0, 1200) }}",
+        "options": {}
+      },
+      "id": "fd6d1acf-d34e-4a6d-83e0-7bd0993af17f",
+      "name": "6. Adaptacion - Generar CV ATS",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        2592,
+        544
+      ],
+      "typeVersion": 1.9
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "output",
+        "options": {
+          "fileName": "=🎯 <b>Nueva vacante compatible</b> ({{ $('Code in JavaScript').item.json.output.score }}%)\n\n<b>{{ $('Code in JavaScript').item.json.title }}</b>\n{{ $('Code in JavaScript').item.json.url }}\n\n<i>Justificación:</i> {{ $('Code in JavaScript').item.json.output.justificacion }}\n\n📄 <b>Cover Letter sugerida:</b>\n{{ $('4. Adaptacion - Generar Cover Letter').item.json.output }}\n\n📎 El CV adaptado en formato ATS va a continuación como archivo."
+        }
+      },
+      "id": "502cfd38-723f-40d2-bdfb-46f4b0165a9e",
+      "name": "Convertir CV a Archivo TXT",
+      "type": "n8n-nodes-base.convertToFile",
+      "position": [
+        2992,
+        528
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<YOUR_GOOGLE_SHEET_ID>",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $('Code in JavaScript').item.json.url }}",
+            "title": "={{ $('Code in JavaScript').item.json.title }}",
+            "score": "={{ $('Code in JavaScript').item.json.output.score }}",
+            "estado": "Aprobado"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ae6ba310-e53e-44c6-a626-8b8fa7d601ee",
+      "name": "Guardar Match Aprobado",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        3024,
+        976
+      ],
+      "typeVersion": 4.5
+    },
+    {
+      "parameters": {
+        "chatId": "<YOUR_TELEGRAM_CHAT_ID>",
+        "text": "=🎯 <b>Nueva vacante compatible</b> ({{ $('Code in JavaScript').item.json.output.score }}%)\n\n<b>{{ $('Code in JavaScript').item.json.title }}</b>\n{{ $('Code in JavaScript').item.json.url }}\n\n<i>Justificación:</i> {{ $('Code in JavaScript').item.json.output.justificacion }}\n\n📄 <b>Cover Letter sugerida:</b>\n{{ $('4. Adaptacion - Generar Cover Letter').item.json.output }}\n\n📎 El CV adaptado en formato ATS va a continuación como archivo.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "174a8a58-e79e-4455-b0d9-8fa0e570eebf",
+      "name": "5. Notificacion - Alerta Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        3376,
+        864
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "<YOUR_TELEGRAM_CHAT_ID>",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "📄 CV adaptado (ATS-friendly) - copialo y pegalo en tu plantilla de Word"
+        }
+      },
+      "id": "9a7bc711-2095-4318-a266-2a69f71bdca6",
+      "name": "7. Enviar CV Adaptado (Documento)",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        3424,
+        592
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<YOUR_GOOGLE_SHEET_ID>",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $json.url }}",
+            "title": "={{ $json.title }}",
+            "score": "={{ $json.output.score }}",
+            "estado": "Descartado"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "0bf0c45d-36e6-44c4-83c0-842c09d98a3a",
+      "name": "Guardar Descartado",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        2112,
+        640
+      ],
+      "typeVersion": 4.5
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "<YOUR_GOOGLE_SHEET_ID>",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "b3404d6c-2f6f-45d0-97f4-658bd62971ee",
+      "name": "Leer Vacantes Ya Procesadas",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        672,
+        784
+      ],
+      "typeVersion": 4.5
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "682ca66d-1ef9-4549-adde-6fcab406f5a2",
+              "leftValue": "={{ $json.description }}",
+              "rightValue": "python",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "3fb0c1b3-ad0a-423a-b6c8-df4d21be0080",
+              "leftValue": "={{ $json.description }}",
+              "rightValue": "network",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "8985e22c-f708-4d07-ac5e-a0edd4fbf61e",
+              "leftValue": "={{ $json.description }}",
+              "rightValue": "linux",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "06ba0d84-4604-4bcd-89dd-efbb0adb673c",
+              "leftValue": "={{ $json.description }}",
+              "rightValue": "javascript",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1296,
+        464
+      ],
+      "id": "1311afe3-9414-45bd-ae6d-afcce3808ac9",
+      "name": "Keywords"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4e907e04-2451-48b9-8e31-f752be3f3522",
+              "leftValue": "={{ $json.description }}",
+              "rightValue": "senior",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "d5c8668c-db52-4940-aeac-10185d82ee86",
+              "leftValue": "={{ $json.title }}",
+              "rightValue": "senior",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1472,
+        432
+      ],
+      "id": "ac507830-675b-4ec3-ad9b-d3035777d418",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1696,
+        400
+      ],
+      "id": "3d019877-b9a3-418f-b9d4-e96aee7a6e97",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 6
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1968,
+        176
+      ],
+      "id": "09c20342-af96-4ec9-a66f-c66d0c61023e",
+      "name": "Wait"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b0872bce-351b-436c-aca2-35a886d90e3a",
+              "name": "title",
+              "value": "={{ $('Loop Over Items').item.json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "44308066-145c-4282-b7e6-572b65aeb89f",
+              "name": "url",
+              "value": "={{ $('Loop Over Items').item.json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "aec08e23-88a7-46bf-9dca-17af23fedf45",
+              "name": "description",
+              "value": "={{ $('Loop Over Items').item.json.description }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1904,
+        688
+      ],
+      "id": "733c845f-d401-41c6-abc5-b716564cf799",
+      "name": "Datos Vacante"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.output.score }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5dbcb9f3-7a6e-4310-bf7a-1574b128bc4b",
+      "name": "3. Filtro - Score >= 60?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2112,
+        368
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TOP = 3; // máximo de vacantes a mandar por corrida\n\nreturn $input.all()\n  .sort((a, b) => b.json.output.score - a.json.output.score)\n  .slice(0, TOP);"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2304,
+        336
+      ],
+      "id": "f86a5b48-8e1d-49ac-8903-bc6b0ebd8e29",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Trigger Diario": {
+      "main": [
+        [
+          {
+            "node": "1a. Fetch RemoteOK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "1b. Fetch Arbeitnow",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Normalizar Campos Vacante",
+            "type": "main",
+            "index": 2
+          },
+          {
+            "node": "Leer Vacantes Ya Procesadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1a. Fetch RemoteOK": {
+      "main": [
+        [
+          {
+            "node": "1a. Normalizar RemoteOK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1a. Normalizar RemoteOK": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Campos Vacante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1b. Fetch Arbeitnow": {
+      "main": [
+        [
+          {
+            "node": "1b. Normalizar Arbeitnow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1b. Normalizar Arbeitnow": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Campos Vacante",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Normalizar Campos Vacante": {
+      "main": [
+        [
+          {
+            "node": "Unir Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unir Datos": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Duplicados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Duplicados": {
+      "main": [
+        [
+          {
+            "node": "Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Modelo Evaluador": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "2. Evaluacion - Match Score vs Perfil",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parser - Score JSON": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "2. Evaluacion - Match Score vs Perfil",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Evaluacion - Match Score vs Perfil": {
+      "main": [
+        [
+          {
+            "node": "Datos Vacante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Modelo Redactor": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "4. Adaptacion - Generar Cover Letter",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Adaptacion - Generar Cover Letter": {
+      "main": [
+        [
+          {
+            "node": "6. Adaptacion - Generar CV ATS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Modelo CV Adaptado": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "6. Adaptacion - Generar CV ATS",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Adaptacion - Generar CV ATS": {
+      "main": [
+        [
+          {
+            "node": "Convertir CV a Archivo TXT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convertir CV a Archivo TXT": {
+      "main": [
+        [
+          {
+            "node": "Guardar Match Aprobado",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "7. Enviar CV Adaptado (Documento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Match Aprobado": {
+      "main": [
+        [
+          {
+            "node": "5. Notificacion - Alerta Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Vacantes Ya Procesadas": {
+      "main": [
+        [
+          {
+            "node": "Unir Datos",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Keywords": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "3. Filtro - Score >= 60?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "2. Evaluacion - Match Score vs Perfil",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos Vacante": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Filtro - Score >= 60?": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guardar Descartado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "4. Adaptacion - Generar Cover Letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {},
+  "nodeGroups": [],
+  "tags": []
+}
